@@ -1,0 +1,74 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: iot_broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: always
+
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: iot_db
+    environment:
+      POSTGRES_DB: gestao_energia
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: senha_segura_iot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  web:
+    build: ./backend
+    container_name: django_app
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_NAME=gestao_energia
+      - DB_USER=admin
+      - DB_PASSWORD=senha_segura_iot
+      - DB_HOST=db
+    depends_on:
+      - db
+      - mosquitto
+  
+  mqtt_worker:
+    build: ./backend
+    container_name: iot_worker
+    
+    command: python -m sensores.mqtt_worker
+    volumes:
+      - ./backend:/app
+    environment:
+      - DB_NAME=gestao_energia
+      - DB_USER=admin
+      - DB_PASSWORD=senha_segura_iot
+      - DB_HOST=db
+    depends_on:
+      - db
+      - mosquitto
+    restart: always
+  
+  frontend:
+    build: ./frontend
+    container_name: react_app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Evita sobrescrever os módulos instalados no container
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:
+
