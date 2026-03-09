@@ -16,9 +16,13 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from sensores.views import LeituraEnergiaList
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from sensores.views import LeituraEnergiaList, MyTokenObtainPairView, lista_sensores_unicos
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/leituras/', LeituraEnergiaList.as_view(), name='leituras-api'),
+    path('api/sensores-lista/', lista_sensores_unicos, name='sensores-unicos-api'),
 ]
