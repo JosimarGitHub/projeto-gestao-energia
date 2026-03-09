@@ -23,7 +23,8 @@ export const PaginaInicial = ({ tema }) => {
         const res = await axios.get(`http://192.168.0.108:8000/api/leituras/?sensor=${encodeURIComponent(sensorId)}`, {
           headers: { 'Authorization': `Bearer ${tokenAtual}` }
         });
-        setLeituras(res.data.reverse());
+        const dadosOrdenados = [...res.data].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        setLeituras(dadosOrdenados);
       } else {
         // Buscar lista de sensores
         const sensoresRes = await axios.get('http://192.168.0.108:8000/api/sensores-lista/', {
@@ -39,7 +40,9 @@ export const PaginaInicial = ({ tema }) => {
           }).then(res => res.data)
         );
         const leiturasArrays = await Promise.all(promises);
-        const allLeiturasFlat = leiturasArrays.flat();
+
+        const allLeiturasFlat = leiturasArrays.flat().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
         console.log('fetched allLeituras total', allLeiturasFlat.length, allLeiturasFlat.slice(-5));
         setAllLeituras(allLeiturasFlat);
       }
@@ -92,7 +95,7 @@ export const PaginaInicial = ({ tema }) => {
               </div>
             
               <div className="small-grafico-card">
-                <GraficoEnergia dados={sensorLeituras} tema={tema} compact />
+                <GraficoEnergia dados={sensorLeituras} tema={tema} compact height={450} />
               </div>
             </div>
           );

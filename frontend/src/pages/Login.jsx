@@ -81,7 +81,7 @@ export const Login = () => {
 
       <div className="footer-credits">
         <small>POWERED BY</small>
-        <img src="/logo-dev.jpeg" alt="Developer" className="img-dev" />
+        <img src="/Artech.png" alt="Developer" className="img-dev" />
       </div>
     </div>
   );
