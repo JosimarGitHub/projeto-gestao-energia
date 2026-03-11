@@ -20,7 +20,7 @@ class LeituraEnergiaList(generics.ListAPIView):
             # Filtra apenas as leituras do sensor clicado
             queryset = queryset.filter(sensor_id=sensor)
             
-        return queryset[:50] # Retorna as últimas 50 daquele sensor
+        return queryset[:500] # Retorna as últimas 50 daquele sensor
 
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer

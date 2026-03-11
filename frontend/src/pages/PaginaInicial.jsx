@@ -20,14 +20,14 @@ export const PaginaInicial = ({ tema }) => {
 
     try {
       if (sensorId) {
-        const res = await axios.get(`http://192.168.0.108:8000/api/leituras/?sensor=${encodeURIComponent(sensorId)}`, {
+        const res = await axios.get(`/api/leituras/?sensor=${encodeURIComponent(sensorId)}`, {
           headers: { 'Authorization': `Bearer ${tokenAtual}` }
         });
         const dadosOrdenados = [...res.data].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         setLeituras(dadosOrdenados);
       } else {
         // Buscar lista de sensores
-        const sensoresRes = await axios.get('http://192.168.0.108:8000/api/sensores-lista/', {
+        const sensoresRes = await axios.get('/api/sensores-lista/', {
           headers: { 'Authorization': `Bearer ${tokenAtual}` }
         });
         const listaSensores = sensoresRes.data;
@@ -35,7 +35,7 @@ export const PaginaInicial = ({ tema }) => {
 
         // Buscar leituras para cada sensor
         const promises = listaSensores.map(sensor =>
-          axios.get(`http://192.168.0.108:8000/api/leituras/?sensor=${encodeURIComponent(sensor)}`, {
+          axios.get(`/api/leituras/?sensor=${encodeURIComponent(sensor)}`, {
             headers: { 'Authorization': `Bearer ${tokenAtual}` }
           }).then(res => res.data)
         );

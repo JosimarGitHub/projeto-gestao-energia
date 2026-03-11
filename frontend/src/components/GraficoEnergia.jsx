@@ -1,5 +1,8 @@
 import { useState, useRef } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { 
+  LineChart, Line, BarChart, Bar, AreaChart, Area, 
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+} from 'recharts';
 import html2canvas from 'html2canvas';
 
 export const GraficoEnergia = ({ dados, compact = false, tema, height: customHeight }) => {
@@ -13,6 +16,8 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
   const padding = compact ? '10px 10px 30px 10px' : '20px 20px 50px 20px';
   const titleSize = compact ? '1.1rem' : '1.25rem';
   const hasData = Array.isArray(dados) && dados.length > 0;
+  const [filteredData, setFilteredData] = useState([]);
+  const [tipoGrafico, setTipoGrafico] = useState('line');
 
   const metricas = {
     tensao: { name: 'Tensão', unit: 'V', color: '#00ff88' },
@@ -24,14 +29,28 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
 
   const dataToUse = isFiltered ? filteredData : dados;
 
+  
   const handleFiltrar = () => {
-    if (!dataInicio || !dataFim) return;
-    const inicio = new Date(dataInicio);
-    const fim = new Date(dataFim);
+    if (!dataInicio || !dataFim) {
+      alert("Selecione as duas datas para filtrar.");
+      return;
+    }
+
+    // Converte as datas selecionadas nos inputs para milissegundos
+    const inicioMS = new Date(dataInicio).getTime();
+    const fimMS = new Date(dataFim).getTime();
+
     const filtrados = dados.filter(d => {
-      const ts = new Date(d.timestamp);
-      return ts >= inicio && ts <= fim;
+      // Converte a data que veio do banco (Django) para milissegundos
+      const leituraMS = new Date(d.timestamp).getTime();
+      return leituraMS >= inicioMS && leituraMS <= fimMS;
     });
+
+    if (filtrados.length === 0) {
+      alert("Nenhum dado encontrado para este período.");
+      return;
+    }
+
     setFilteredData(filtrados);
     setIsFiltered(true);
   };
@@ -69,24 +88,43 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
       }
     }
   };
-
   const handleZoomIn = () => {
     setZoomFactor(prev => Math.max(0.1, prev * 0.8));
+    setZoomTempo(prev => Math.min(10, prev * 1.5));
   };
 
   const handleZoomOut = () => {
     setZoomFactor(prev => Math.min(10, prev * 1.2));
+    setZoomTempo(prev => Math.max(1, prev * 0.7));
   };
 
   const handleResetZoom = () => {
     setZoomFactor(1);
+    setZoomTempo(1);
   };
 
   // Calcular min e max para o domain
   const values = dataToUse.map(d => d[metrica]).filter(v => v != null);
   const dataMin = values.length > 0 ? Math.min(...values) : 0;
   const dataMax = values.length > 0 ? Math.max(...values) : 100;
-  const yDomain = [dataMin - (dataMax - dataMin) * (zoomFactor - 1) / 2, dataMax + (dataMax - dataMin) * (zoomFactor - 1) / 2];
+  // Calcula a diferença real entre o maior e menor valor
+  const amplitude = (dataMax - dataMin) || 10; 
+
+  // O zoomFactor deve reduzir a amplitude visível para "aproximar"
+  // Zoom In: zoomFactor < 1 (ex: 0.5) -> Amplitude menor -> Gráfico "perto"
+  // Zoom Out: zoomFactor > 1 (ex: 2.0) -> Amplitude maior -> Gráfico "longe"
+  const margem = (amplitude / 2) * zoomFactor;
+  const centro = (dataMax + dataMin) / 2;
+
+  const yDomain = [
+    centro - margem, 
+    centro + margem
+  ];
+
+  const [zoomTempo, setZoomTempo] = useState(1); // 1 = 100% dos dados, 0.5 = 50% mais recentes
+  // Pega apenas uma fatia (slice) dos dados baseada no zoom de tempo
+  // Ex: se zoomTempo for 0.5, mostra apenas os 50% finais do array (os mais recentes)
+  const dataFinal = dataToUse.slice(Math.floor(dataToUse.length * (1 - 1 / zoomTempo)));
 
   return (
   <div 
@@ -157,9 +195,34 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
       <button onClick={exportImage} style={btnStyle(true, compact)}>Imagem</button>
 
       {/* CONTROLES DE ZOOM */}
-      <button onClick={handleZoomIn} style={btnStyle(false, compact)}>Zoom +</button>
-      <button onClick={handleZoomOut} style={btnStyle(false, compact)}>Zoom -</button>
-      <button onClick={handleResetZoom} style={btnStyle(false, compact)}>Reset Zoom</button>
+      {tipoGrafico !== 'bar' && (
+        <>
+        <button onClick={handleZoomIn} style={btnStyle(false, compact)}>Zoom +</button>
+        <button onClick={handleZoomOut} style={btnStyle(false, compact)}>Zoom -</button>
+        <button onClick={handleResetZoom} style={btnStyle(false, compact)}>Reset Zoom</button>
+        </>
+      )}
+
+       {/* CONTROLE DE TIPO DE GRÁFICO */}
+      <div style={{ display: 'flex', gap: '5px', marginLeft: 'auto' }}>
+        {['line', 'bar', 'area'].map(tipo => (
+          <button
+            key={tipo}
+            onClick={() => setTipoGrafico(tipo)}
+            style={{
+              padding: '4px 8px',
+              backgroundColor: tipoGrafico === tipo ? 'var(--primary)' : 'var(--bg-sidebar)',
+              color: tipoGrafico === tipo ? 'white' : 'var(--text-main)',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '0.7rem',
+              cursor: 'pointer'
+            }}
+          >
+            {tipo.toUpperCase()}
+          </button>
+        ))}
+      </div>
     </div>
 
     {/* 3. ÁREA DO GRÁFICO */}
@@ -170,37 +233,105 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
         </p>
       ) : (
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={dataToUse} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
-            <XAxis 
-              dataKey="timestamp" 
-              tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 
-              stroke="#888"
-              fontSize={10}
-              padding={{ left: 10, right: 10 }}
-            />
-            <YAxis stroke="#888" domain={['dataMin - 5', 'dataMax + 5']} tick={{ fontSize: 10 }} width={40} />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: tema === 'dark' ? '#222' : '#fff', 
-                border: 'none',
-                color: tema === 'dark' ? '#fff' : '#000',
-                fontSize: '12px'
-              }}
-              labelFormatter={(label) => new Date(label).toLocaleString()}
-              shared={false}
-            />
-            <Line 
-              type="monotone" 
-              dataKey={metrica}
-              name={currentMetrica.name}
-              stroke={currentMetrica.color}
-              strokeWidth={2} 
-              dot={hasData && dataToUse.length < 2}
-              animationDuration={300}
-            />
-          </LineChart>
+          {/* ESCOLHA DO TIPO DE GRÁFICO */}
+          {tipoGrafico === 'bar' ? (
+            <BarChart data={dataFinal} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
+              <XAxis 
+                dataKey="timestamp" 
+                tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                minTickGap={30} stroke="#888" fontSize={10} padding={{ left: 10, right: 10 }}
+                label={{ 
+                  value: 'HORÁRIO', 
+                  position: 'insideBottom', 
+                  offset: -5, // Valor negativo pequeno para ficar logo abaixo dos números
+                  style: { fill: '#888', fontSize: '10px', fontWeight: 'bold' } 
+                }}
+              />
+              {/* No modo BARRA o domain é fixo em [0, 'auto'] */}
+              <YAxis stroke="#888" 
+                domain={[0, 'auto']} 
+                tick={{ fontSize: 10 }} 
+                width={40}
+                label={{ 
+                  value: `${currentMetrica.name} (${currentMetrica.unit})`, 
+                  angle: -90, 
+                  position: 'insideLeft', 
+                  offset: -10, // Ajuste este valor até o texto aparecer ao lado dos números
+                  style: { textAnchor: 'middle', fill: '#888', fontWeight: 'bold', fontSize: '11px' } 
+                }} 
+              />
+              <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#222' : '#fff', border: 'none', color: tema === 'dark' ? '#fff' : '#000' }} />
+              <Bar dataKey={metrica} fill={currentMetrica.color} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          ) : tipoGrafico === 'area' ? (
+            <AreaChart data={dataFinal} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+              <defs>
+                <linearGradient id="colorFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={currentMetrica.color} stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor={currentMetrica.color} stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
+              <XAxis 
+                dataKey="timestamp" 
+                tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                minTickGap={30} stroke="#888" fontSize={10}
+                label={{ 
+                  value: 'HORÁRIO', 
+                  position: 'insideBottom', 
+                  offset: -5, // Valor negativo pequeno para ficar logo abaixo dos números
+                  style: { fill: '#888', fontSize: '10px', fontWeight: 'bold' } 
+                }}
+              />
+              <YAxis stroke="#888" 
+                domain={yDomain} 
+                tick={{ fontSize: 10 }} 
+                width={40}
+                label={{ 
+                  value: `${currentMetrica.name} (${currentMetrica.unit})`, 
+                  angle: -90, 
+                  position: 'insideLeft', 
+                  offset: -10, // Ajuste este valor até o texto aparecer ao lado dos números
+                  style: { textAnchor: 'middle', fill: '#888', fontWeight: 'bold', fontSize: '11px' } 
+                }}  
+              />
+              <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#222' : '#fff', border: 'none', color: tema === 'dark' ? '#fff' : '#000' }} />
+              <Area type="monotone" dataKey={metrica} stroke={currentMetrica.color} fill="url(#colorFill)" strokeWidth={2} />
+            </AreaChart>
+          ) : (
+            /* SEU LINECHART ORIGINAL */
+            <LineChart data={dataFinal} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
+              <XAxis 
+                dataKey="timestamp" 
+                tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                minTickGap={30} stroke="#888" fontSize={10}
+                label={{ 
+                  value: 'HORÁRIO', 
+                  position: 'insideBottom', 
+                  offset: -5, // Valor negativo pequeno para ficar logo abaixo dos números
+                  style: { fill: '#888', fontSize: '10px', fontWeight: 'bold' } 
+                }}
+              />
+              <YAxis stroke="#888" 
+                domain={yDomain} 
+                tick={{ fontSize: 10 }} 
+                width={40}
+                label={{ 
+                  value: `${currentMetrica.name} (${currentMetrica.unit})`, 
+                  angle: -90, 
+                  position: 'insideLeft', 
+                  offset: -10, // Ajuste este valor até o texto aparecer ao lado dos números
+                  style: { textAnchor: 'middle', fill: '#888', fontWeight: 'bold', fontSize: '11px' } 
+                }}  
+              />
+              <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#222' : '#fff', border: 'none', color: tema === 'dark' ? '#fff' : '#000' }} />
+              <Line type="monotone" dataKey={metrica} stroke={currentMetrica.color} strokeWidth={2} dot={false} animationDuration={300} />
+            </LineChart>
+          )}
         </ResponsiveContainer>
+
       )}
     </div>
   </div>

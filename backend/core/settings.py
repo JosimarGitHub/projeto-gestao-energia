@@ -25,9 +25,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-4k)0k9-#1xfjnycb5@h+^vn+1%ywvai-@!c2rq3gd=6ng-gm_a'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['192.168.0.108', 'localhost', 'web', '127.0.0.1']
 
 
 # Application definition
@@ -136,7 +136,9 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CORS_ALLOW_ALL_ORIGINS = True
+# NOVIDADE: O Django precisa disso para aceitar o login vindo do Nginx
+CSRF_TRUSTED_ORIGINS = ['http://192.168.0.108']
+CORS_ALLOWED_ORIGINS = ['http://192.168.0.108']
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -152,3 +154,6 @@ SIMPLE_JWT = {
     'SIGNING_KEY': SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
+
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')

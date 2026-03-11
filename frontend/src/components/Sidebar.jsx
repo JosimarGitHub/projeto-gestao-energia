@@ -13,7 +13,7 @@ export const Sidebar = ({ tema, toggleTema, menuAberto, setMenuAberto }) => {
       if (!token) return;
 
       try {
-        const res = await axios.get('http://192.168.0.108:8000/api/sensores-lista/', {
+        const res = await axios.get('/api/sensores-lista/', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         setListaSensores(res.data);

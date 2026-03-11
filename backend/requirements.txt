@@ -4,3 +4,4 @@ paho-mqtt        # Para o IoT (MQTT)
 djangorestframework  # Para o Front em React
 django-cors-headers  # Para o React conseguir falar com o Django
 djangorestframework-simplejwt #tokem para login
+gunicorn==23.0.0

@@ -13,7 +13,7 @@ export const Login = () => {
   setErro(''); // Limpa erro anterior
   try {
     // 1. Ajuste o IP/Porta para o seu servidor Django (ex: porta 8000)
-    const res = await axios.post('http://192.168.0.108:8000/api/token/', { 
+    const res = await axios.post('/api/token/', { 
       username, 
       password 
     });

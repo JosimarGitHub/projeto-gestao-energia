@@ -45,6 +45,8 @@ body { font-family: 'Inter', sans-serif; overflow-x: hidden; }
   flex-direction: column;
   z-index: 1000;
   transition: transform 0.3s ease, background 0.3s;
+  overflow-y: auto; /* Cria a barra de rolagem vertical se o conteúdo crescer */
+  overflow-x: hidden; /* Impede a rolagem chata para os lados */
 }
 
 .sidebar-logo { text-align: center; margin-bottom: 3rem; }
@@ -52,7 +54,9 @@ body { font-family: 'Inter', sans-serif; overflow-x: hidden; }
 .sidebar-main-title { font-size: 1.2rem; color: var(--primary); font-weight: 800; }
 .sidebar-sub-title { font-size: 0.7rem; letter-spacing: 2px; color: var(--text-muted); }
 
-.sidebar-nav { flex-grow: 1; display: flex; flex-direction: column; gap: 0.5rem; }
+.sidebar-nav { flex-grow: 1; flex: 1; display: flex; 
+  flex-direction: column; gap: 0.5rem; overflow-y: auto; }
+
 .nav-item { 
   text-decoration: none; color: var(--text-main); padding: 12px; 
   border-radius: 8px; font-weight: 600; transition: 0.2s; 
@@ -60,6 +64,20 @@ body { font-family: 'Inter', sans-serif; overflow-x: hidden; }
 .nav-item:hover, .nav-item.active { background: var(--primary); color: white; }
 
 .sidebar-footer { margin-top: auto; padding-top: 2rem; border-top: 1px solid var(--border-color); }
+
+/* OPCIONAL: Deixar a barra de rolagem bonitinha (estilo moderno) */
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+}
+
+[data-theme='dark'] .sidebar::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.1);
+}
 
 /* MAIN CONTENT */
 .main-content {
