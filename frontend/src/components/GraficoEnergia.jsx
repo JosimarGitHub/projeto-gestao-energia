@@ -1,11 +1,273 @@
-import { useState, useRef } from 'react';
-import { 
-  LineChart, Line, BarChart, Bar, AreaChart, Area, 
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
-} from 'recharts';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
+import axios from 'axios';
 import html2canvas from 'html2canvas';
 
-export const GraficoEnergia = ({ dados, compact = false, tema, height: customHeight }) => {
+export const GraficoUPlot = forwardRef(({ dados, tema, metrica, cor, altura, tipoGrafico }, ref) => {
+  const chartRef = useRef();
+  const uInstance = useRef();
+
+  const ts = dados.map(d => new Date(d.timestamp).getTime() / 1000);
+  const xMin = Math.min(...ts);
+  const xMax = Math.max(...ts);
+
+  function drawBars(u, seriesIdx, idx0, idx1) {
+    const { paths } = uPlot;
+    return paths.bars({ size: [0.6, 100] })(u, seriesIdx, idx0, idx1);
+  }
+
+  // Plugin para área (o que você já tem, mas explícito)
+  function drawArea(u, seriesIdx, idx0, idx1) {
+      return uPlot.paths.stepped({ align: 1 })(u, seriesIdx, idx0, idx1);
+  }
+
+  useEffect(() => {
+    
+    if (!dados || dados.length === 0) return;
+
+    // uPlot espera: [ [timestamps], [valores] ]
+    const data = [
+      dados.map(d => new Date(d.timestamp).getTime() / 1000),
+      dados.map(d => d[metrica] || 0)
+    ];
+
+    const opts = {
+      width: chartRef.current.offsetWidth,
+      height: altura,
+      cursor: {
+        drag: { setScale: false, setSeries: true }, // Permite selecionar área para ZOOM
+        sync: { key: "mo" },      // Sincroniza se houver mais de um gráfico
+        points: { size: 10, fill: cor },
+        dataIdx: (self, seriesIdx, hoveredIdx) => hoveredIdx
+      },
+
+      hooks: {
+        ready: [
+          (u) => {
+            let dragging = false;
+            let x0, xMin0, xMax0;
+
+            u.over.addEventListener("mousedown", e => {
+              dragging = true;
+              x0 = e.clientX;
+              xMin0 = u.scales.x.min;
+              xMax0 = u.scales.x.max;
+
+              document.addEventListener("mousemove", mousemove);
+              document.addEventListener("mouseup", mouseup);
+            });
+
+            u.over.addEventListener("wheel", e => {
+              e.preventDefault();
+
+              const { min, max } = u.scales.x;
+              const range = max - min;
+
+              const factor = e.deltaY < 0 ? 0.9 : 1.1;
+              const center = (min + max) / 2;
+
+              const newRange = range * factor;
+
+              u.setScale("x", {
+                min: center - newRange / 2,
+                max: center + newRange / 2
+              });
+            });
+
+            const mousemove = (e) => {
+              if (!dragging) return;
+
+              const dx = e.clientX - x0;
+
+              const factor = (xMax0 - xMin0) / u.bbox.width;
+
+              const shift = dx * factor;
+
+              u.setScale("x", {
+                min: xMin0 - shift,
+                max: xMax0 - shift,
+              });
+            };
+
+            const mouseup = () => {
+              dragging = false;
+              document.removeEventListener("mousemove", mousemove);
+              document.removeEventListener("mouseup", mouseup);
+            };
+
+             const handleTeclado = (e) => {
+              const { min, max } = u.scales.x;
+              const range = max - min;
+              const step = range * 0.1; // Move 10% da tela por clique
+
+              if (e.key === "ArrowLeft") {
+                u.setScale("x", { min: min - step, max: max - step });
+              } else if (e.key === "ArrowRight") {
+                u.setScale("x", { min: min + step, max: max + step });
+              } else if (e.key === "ArrowUp") {
+                // Zoom In opcional via teclado
+                u.setScale("x", { min: min + step, max: max - step });
+              } else if (e.key === "ArrowDown") {
+                // Zoom Out opcional via teclado
+                u.setScale("x", { min: min - step, max: max + step });
+              }
+            };
+
+            // Adiciona o evento ao documento para capturar as setas
+            document.addEventListener("keydown", handleTeclado);
+
+            // Importante: Remover o evento quando o gráfico sumir
+            u.hooks.destroy = [() => {
+              document.removeEventListener("keydown", handleTeclado);
+            }];
+
+          }
+        ]
+      },
+
+      scales: { 
+        x: { 
+          time: true,  
+          auto: false, 
+          min: xMin,
+          max: xMax,  
+        }, 
+        y: {
+          auto: true, 
+          range: (self, min, max) => {
+            let span = max - min;
+            if (span === 0) span = 2; // Evita divisão por zero
+            return [min - span * 0.1, max + span * 0.1];
+          } 
+        } 
+      },
+      series: [
+        {
+          // 1. Muda o nome de "Time" para "Hora"
+          label: "Hora", 
+          // 2. Formata para: HH:MM - DD/MM/AA
+          value: (_, val) => {
+            if (val == null) return "--";
+            const d = new Date(val * 1000);
+            const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            const data = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+            return `${hora} - ${data}`; // Aqui você define a apresentação
+          },
+        },
+        {
+          label: metrica.toUpperCase(),
+          stroke: cor,
+          width: tipoGrafico === 'bar' ? 0 : 2,
+
+          fill: tipoGrafico === 'bar' 
+            ? cor 
+            : (tipoGrafico === 'area' ? `${cor}33` : `${cor}00`),
+
+          filter: (self, seriesIdx, show) => null,
+          paths: tipoGrafico === 'bar' ? uPlot.paths.bars({size: [0.6, 100]}) : undefined, 
+          spanGaps: true,
+          points: { show: tipoGrafico === 'line', size: 4 }
+        },
+      ],
+      axes: [
+        {
+        // --- EIXO X (DATA E HORA) ---
+        stroke: tema === 'dark' ? "#888" : "#666",
+        space: 40,
+        size: 30,
+        grid: {
+          stroke: tema === 'dark' ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", // Grid bem opaco
+          width: 1,
+        },
+        // Formata para o padrão brasileiro sem segundos
+        values: (self, ticks) => ticks.map(t => {
+          const d = new Date(t * 1000);
+          return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        }),
+        },
+        {
+          // --- EIXO Y (VALORES) ---
+          stroke: tema === 'dark' ? "#888" : "#666",
+          grid: {
+            stroke: tema === 'dark' ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", // Grid bem opaco
+            width: 1,
+          },
+          size: 50,
+          // Formata o valor com 1 casa decimal e o sufixo da unidade
+          values: (self, ticks) => ticks.map(t => t.toFixed(1)) 
+        }
+      ],
+      legend: {
+        show: true,
+        live: true,
+        values: [
+          {
+            // Formata o Tempo na legenda (Topo do gráfico)
+            label: "Data/Hora",
+            value: (self, val) => val == null ? "--" : new Date(val * 1000).toLocaleString('pt-BR', { 
+              day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' 
+            }),
+          },
+          {
+            // Formata o Valor na legenda
+            label: "Medição",
+            value: (self, val) => val == null ? "--" : val.toFixed(2),
+          }
+        ]
+      }
+    };
+
+    if (!uInstance.current) {
+      uInstance.current = new uPlot(opts, data, chartRef.current);
+    } else {
+      uInstance.current.setData(data);
+    }
+
+    return () => {
+      uInstance.current?.destroy();
+      uInstance.current = null;
+    };
+  }, [dados, tema, metrica, cor, altura, tipoGrafico]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (uInstance.current && chartRef.current) {
+        uInstance.current.setSize({
+          width: chartRef.current.offsetWidth,
+          height: altura
+        });
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [altura]);
+
+  useImperativeHandle(ref, () => ({
+      zoomBy: (factor) => {
+        const u = uInstance.current;
+        if (!u) return;
+        const { min, max } = u.scales.x;
+        const center = (min + max) / 2;
+        const range = (max - min) * factor;
+        u.setScale('x', { min: center - range / 2, max: center + range / 2 });
+      },
+      resetZoom: () => {
+        const u = uInstance.current;
+        if (!u) return;
+        // opcional: ajustar para os extremos dos dados
+        const ts = dados.map(d => new Date(d.timestamp).getTime() / 1000);
+        const xMin = Math.min(...ts);
+        const xMax = Math.max(...ts);
+        u.setScale('x', { min: xMin, max: xMax });
+      }
+    }));
+
+  return <div ref={chartRef} />;
+});
+
+export const GraficoEnergia = ({ dados, compact = false, pausado, setPausado, tema, sensorId, height: customHeight }) => {
   const [metrica, setMetrica] = useState('tensao');
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
@@ -17,7 +279,8 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
   const titleSize = compact ? '1.1rem' : '1.25rem';
   const hasData = Array.isArray(dados) && dados.length > 0;
   const [filteredData, setFilteredData] = useState([]);
-  const [tipoGrafico, setTipoGrafico] = useState('line');
+  const [tipoGrafico, setTipoGrafico] = useState('area');
+  const uplotRef = useRef();
 
   const metricas = {
     tensao: { name: 'Tensão', unit: 'V', color: '#00ff88' },
@@ -30,29 +293,38 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
   const dataToUse = isFiltered ? filteredData : dados;
 
   
-  const handleFiltrar = () => {
+  const handleFiltrar = async () => { // Adicione o 'async' aqui
     if (!dataInicio || !dataFim) {
       alert("Selecione as duas datas para filtrar.");
       return;
     }
 
-    // Converte as datas selecionadas nos inputs para milissegundos
-    const inicioMS = new Date(dataInicio).getTime();
-    const fimMS = new Date(dataFim).getTime();
+    const token = localStorage.getItem('token');
 
-    const filtrados = dados.filter(d => {
-      // Converte a data que veio do banco (Django) para milissegundos
-      const leituraMS = new Date(d.timestamp).getTime();
-      return leituraMS >= inicioMS && leituraMS <= fimMS;
-    });
+    try {
+      // O PULO DO GATO: Fazemos uma nova busca no BANCO DE DADOS (Django)
+      // Passamos os parâmetros inicio e fim na URL
+      const res = await axios.get(`/api/leituras/?sensor=${encodeURIComponent(sensorId)}&inicio=${dataInicio}&fim=${dataFim}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
 
-    if (filtrados.length === 0) {
-      alert("Nenhum dado encontrado para este período.");
-      return;
+      if (res.data.length === 0) {
+        alert("Nenhum dado encontrado no banco para este período.");
+        return;
+      }
+
+      // Ordenamos os dados que vieram do banco para o gráfico não bugar
+      const dadosOrdenados = [...res.data].sort(
+        (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+      );
+
+      setFilteredData(dadosOrdenados);
+      setIsFiltered(true); // Isso vai pausar o auto-refresh de 5s
+      
+    } catch (err) {
+      console.error("Erro ao buscar histórico no banco:", err);
+      alert("Erro ao conectar com o servidor.");
     }
-
-    setFilteredData(filtrados);
-    setIsFiltered(true);
   };
 
   const handleLimpar = () => {
@@ -89,18 +361,15 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
     }
   };
   const handleZoomIn = () => {
-    setZoomFactor(prev => Math.max(0.1, prev * 0.8));
-    setZoomTempo(prev => Math.min(10, prev * 1.5));
+    uplotRef.current?.zoomBy(0.9);
   };
 
   const handleZoomOut = () => {
-    setZoomFactor(prev => Math.min(10, prev * 1.2));
-    setZoomTempo(prev => Math.max(1, prev * 0.7));
+     uplotRef.current?.zoomBy(1.1);
   };
 
   const handleResetZoom = () => {
-    setZoomFactor(1);
-    setZoomTempo(1);
+    uplotRef.current?.resetZoom();
   };
 
   // Calcular min e max para o domain
@@ -121,10 +390,10 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
     centro + margem
   ];
 
-  const [zoomTempo, setZoomTempo] = useState(1); // 1 = 100% dos dados, 0.5 = 50% mais recentes
+  //const [zoomTempo, setZoomTempo] = useState(1); 1 = 100% dos dados, 0.5 = 50% mais recentes
   // Pega apenas uma fatia (slice) dos dados baseada no zoom de tempo
   // Ex: se zoomTempo for 0.5, mostra apenas os 50% finais do array (os mais recentes)
-  const dataFinal = dataToUse.slice(Math.floor(dataToUse.length * (1 - 1 / zoomTempo)));
+  const dataFinal = dataToUse; // passe TODOS os dados para o uPlot
 
   return (
   <div 
@@ -146,14 +415,21 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
       Monitoramento de {currentMetrica.name} ({currentMetrica.unit})
     </h3>
 
-    {/* 2. CONTAINER DE TODOS OS BOTÕES E FILTROS */}
+    {/* CONTAINER PAI: Garante que tudo tente ficar na mesma linha */}
     <div style={{ 
-      marginBottom: '15px', 
       display: 'flex', 
       flexWrap: 'wrap', 
       alignItems: 'center', 
-      gap: '8px',
-      flexShrink: 0 // IMPEDE que o gráfico esmague os botões
+      gap: '10px', 
+      marginBottom: '15px' 
+    }}>
+    {/* 2. CONTAINER QUE APARECE SEMPRE (HOME E DETALHE) */}
+    <div style={{ 
+      marginBottom: '10px', 
+      display: 'flex', 
+      flexWrap: 'wrap', 
+      alignItems: 'center', 
+      gap: '8px' 
     }}>
       {/* SELEÇÃO DE MÉTRICA */}
       {Object.keys(metricas).map(key => (
@@ -173,56 +449,85 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
           {metricas[key].name}
         </button>
       ))}
+    </div>
 
-      {/* INPUTS DE DATA */}
-      <input
-        type="datetime-local"
-        value={dataInicio}
-        onChange={(e) => setDataInicio(e.target.value)}
-        style={{ padding: compact ? '3px' : '5px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}
-      />
-      <input
-        type="datetime-local"
-        value={dataFim}
-        onChange={(e) => setDataFim(e.target.value)}
-        style={{ padding: compact ? '3px' : '5px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}
-      />
+    {/* 3. CONTAINER QUE SÓ APARECE NO DETALHE (NÃO COMPACTO) */}
+    {!compact && (
+      <div style={{ 
+        marginBottom: '15px', 
+        display: 'flex', 
+        flexWrap: 'wrap', 
+        alignItems: 'center', 
+        gap: '8px',
+        flexShrink: 0
+      }}>
+        {/* INPUTS DE DATA */}
+        <input
+          type="datetime-local"
+          value={dataInicio}
+          onChange={(e) => setDataInicio(e.target.value)}
+          style={{ padding: '5px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}
+        />
+        <input
+          type="datetime-local"
+          value={dataFim}
+          onChange={(e) => setDataFim(e.target.value)}
+          style={{ padding: '5px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}
+        />
 
-      {/* BOTÕES DE AÇÃO (FILTRAR, LIMPAR, EXPORTAR) */}
-      <button onClick={handleFiltrar} style={btnStyle(true, compact)}>Filtrar</button>
-      <button onClick={handleLimpar} style={btnStyle(false, compact)}>Limpar</button>
-      <button onClick={exportCSV} style={btnStyle(true, compact)}>CSV</button>
-      <button onClick={exportImage} style={btnStyle(true, compact)}>Imagem</button>
+        {/* BOTÕES DE AÇÃO */}
+        <button onClick={handleFiltrar} style={btnStyle(true, compact)}>Filtrar</button>
+        <button onClick={handleLimpar} style={btnStyle(false, compact)}>Limpar</button>
+        <button onClick={exportCSV} style={btnStyle(true, compact)}>CSV</button>
+        <button onClick={exportImage} style={btnStyle(true, compact)}>Imagem</button>
 
-      {/* CONTROLES DE ZOOM */}
-      {tipoGrafico !== 'bar' && (
-        <>
-        <button onClick={handleZoomIn} style={btnStyle(false, compact)}>Zoom +</button>
-        <button onClick={handleZoomOut} style={btnStyle(false, compact)}>Zoom -</button>
-        <button onClick={handleResetZoom} style={btnStyle(false, compact)}>Reset Zoom</button>
-        </>
-      )}
+        {/* CONTROLES DE ZOOM */}
+        {tipoGrafico !== 'bar' && (
+          <>
+            <button onClick={handleZoomIn} style={btnStyle(false, compact)}>Zoom +</button>
+            <button onClick={handleZoomOut} style={btnStyle(false, compact)}>Zoom -</button>
+            <button onClick={handleResetZoom} style={btnStyle(false, compact)}>Reset Zoom</button>
+          </>
+        )}
 
-       {/* CONTROLE DE TIPO DE GRÁFICO */}
-      <div style={{ display: 'flex', gap: '5px', marginLeft: 'auto' }}>
-        {['line', 'bar', 'area'].map(tipo => (
-          <button
-            key={tipo}
-            onClick={() => setTipoGrafico(tipo)}
-            style={{
-              padding: '4px 8px',
-              backgroundColor: tipoGrafico === tipo ? 'var(--primary)' : 'var(--bg-sidebar)',
-              color: tipoGrafico === tipo ? 'white' : 'var(--text-main)',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '0.7rem',
-              cursor: 'pointer'
-            }}
-          >
-            {tipo.toUpperCase()}
-          </button>
-        ))}
+        {/* BOTÃO DE PAUSE/PLAY */}
+        <button 
+          onClick={() => setPausado && setPausado(!pausado)}
+          style={{
+            padding: '8px 15px',
+            backgroundColor: pausado ? '#ff4444' : 'var(--primary)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          {pausado ? '▶ RETOMAR' : '⏸ PAUSAR'}
+        </button>
+
+        {/* CONTROLE DE TIPO DE GRÁFICO */}
+        <div style={{ display: 'flex', gap: '5px', marginLeft: 'auto' }}>
+          {['line', 'bar', 'area'].map(tipo => (
+            <button
+              key={tipo}
+              onClick={() => setTipoGrafico(tipo)}
+              style={{
+                padding: '4px 8px',
+                backgroundColor: tipoGrafico === tipo ? 'var(--primary)' : 'var(--bg-sidebar)',
+                color: tipoGrafico === tipo ? 'white' : 'var(--text-main)',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '0.7rem',
+                cursor: 'pointer'
+              }}
+            >
+              {tipo.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
+    )}
     </div>
 
     {/* 3. ÁREA DO GRÁFICO */}
@@ -232,105 +537,21 @@ export const GraficoEnergia = ({ dados, compact = false, tema, height: customHei
           Sem dados suficientes para o gráfico
         </p>
       ) : (
-        <ResponsiveContainer width="100%" height="100%">
-          {/* ESCOLHA DO TIPO DE GRÁFICO */}
-          {tipoGrafico === 'bar' ? (
-            <BarChart data={dataFinal} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
-              <XAxis 
-                dataKey="timestamp" 
-                tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                minTickGap={30} stroke="#888" fontSize={10} padding={{ left: 10, right: 10 }}
-                label={{ 
-                  value: 'HORÁRIO', 
-                  position: 'insideBottom', 
-                  offset: -5, // Valor negativo pequeno para ficar logo abaixo dos números
-                  style: { fill: '#888', fontSize: '10px', fontWeight: 'bold' } 
-                }}
-              />
-              {/* No modo BARRA o domain é fixo em [0, 'auto'] */}
-              <YAxis stroke="#888" 
-                domain={[0, 'auto']} 
-                tick={{ fontSize: 10 }} 
-                width={40}
-                label={{ 
-                  value: `${currentMetrica.name} (${currentMetrica.unit})`, 
-                  angle: -90, 
-                  position: 'insideLeft', 
-                  offset: -10, // Ajuste este valor até o texto aparecer ao lado dos números
-                  style: { textAnchor: 'middle', fill: '#888', fontWeight: 'bold', fontSize: '11px' } 
-                }} 
-              />
-              <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#222' : '#fff', border: 'none', color: tema === 'dark' ? '#fff' : '#000' }} />
-              <Bar dataKey={metrica} fill={currentMetrica.color} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          ) : tipoGrafico === 'area' ? (
-            <AreaChart data={dataFinal} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-              <defs>
-                <linearGradient id="colorFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={currentMetrica.color} stopOpacity={0.4}/>
-                  <stop offset="95%" stopColor={currentMetrica.color} stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
-              <XAxis 
-                dataKey="timestamp" 
-                tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                minTickGap={30} stroke="#888" fontSize={10}
-                label={{ 
-                  value: 'HORÁRIO', 
-                  position: 'insideBottom', 
-                  offset: -5, // Valor negativo pequeno para ficar logo abaixo dos números
-                  style: { fill: '#888', fontSize: '10px', fontWeight: 'bold' } 
-                }}
-              />
-              <YAxis stroke="#888" 
-                domain={yDomain} 
-                tick={{ fontSize: 10 }} 
-                width={40}
-                label={{ 
-                  value: `${currentMetrica.name} (${currentMetrica.unit})`, 
-                  angle: -90, 
-                  position: 'insideLeft', 
-                  offset: -10, // Ajuste este valor até o texto aparecer ao lado dos números
-                  style: { textAnchor: 'middle', fill: '#888', fontWeight: 'bold', fontSize: '11px' } 
-                }}  
-              />
-              <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#222' : '#fff', border: 'none', color: tema === 'dark' ? '#fff' : '#000' }} />
-              <Area type="monotone" dataKey={metrica} stroke={currentMetrica.color} fill="url(#colorFill)" strokeWidth={2} />
-            </AreaChart>
+        <div style={{ flex: 1, width: '100%', minHeight: 0, marginTop: '10px' }}>
+          {!hasData ? (
+            <p>Sem dados...</p>
           ) : (
-            /* SEU LINECHART ORIGINAL */
-            <LineChart data={dataFinal} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={tema === 'dark' ? '#444' : '#ccc'} vertical={false} />
-              <XAxis 
-                dataKey="timestamp" 
-                tickFormatter={(str) => new Date(str).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                minTickGap={30} stroke="#888" fontSize={10}
-                label={{ 
-                  value: 'HORÁRIO', 
-                  position: 'insideBottom', 
-                  offset: -5, // Valor negativo pequeno para ficar logo abaixo dos números
-                  style: { fill: '#888', fontSize: '10px', fontWeight: 'bold' } 
-                }}
-              />
-              <YAxis stroke="#888" 
-                domain={yDomain} 
-                tick={{ fontSize: 10 }} 
-                width={40}
-                label={{ 
-                  value: `${currentMetrica.name} (${currentMetrica.unit})`, 
-                  angle: -90, 
-                  position: 'insideLeft', 
-                  offset: -10, // Ajuste este valor até o texto aparecer ao lado dos números
-                  style: { textAnchor: 'middle', fill: '#888', fontWeight: 'bold', fontSize: '11px' } 
-                }}  
-              />
-              <Tooltip contentStyle={{ backgroundColor: tema === 'dark' ? '#222' : '#fff', border: 'none', color: tema === 'dark' ? '#fff' : '#000' }} />
-              <Line type="monotone" dataKey={metrica} stroke={currentMetrica.color} strokeWidth={2} dot={false} animationDuration={300} />
-            </LineChart>
+            <GraficoUPlot
+              ref={uplotRef}
+              dados={dataFinal} 
+              tema={tema} 
+              metrica={metrica}
+              tipoGrafico={tipoGrafico} 
+              cor={currentMetrica.color} 
+              altura={height - 150} // Desconta o espaço dos botões
+            />
           )}
-        </ResponsiveContainer>
+        </div>
 
       )}
     </div>
@@ -349,5 +570,4 @@ function btnStyle(primary, compact) {
     fontSize: compact ? '0.75rem' : '0.85rem'
   };
 }
-
 };

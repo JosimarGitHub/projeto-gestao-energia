@@ -9,6 +9,8 @@ export const PaginaInicial = ({ tema }) => {
   const [leituras, setLeituras] = useState([]);
   const [allLeituras, setAllLeituras] = useState([]);
   const [sensores, setSensores] = useState([]);
+  const [pausado, setPausado] = useState(false);
+
   
   const buscarDados = async () => {
     const tokenAtual = localStorage.getItem('token');
@@ -57,10 +59,13 @@ export const PaginaInicial = ({ tema }) => {
   };
 
   useEffect(() => {
-    buscarDados();
+
+    if (pausado) return;
+
+    //buscarDados();
     const intervalo = setInterval(buscarDados, 5000);
     return () => clearInterval(intervalo);
-  }, [sensorId]);
+  }, [sensorId, pausado]);
 
   const ultimaLeitura = leituras.length > 0 ? leituras[leituras.length - 1] : null;
 
@@ -72,7 +77,13 @@ export const PaginaInicial = ({ tema }) => {
         <CardsMedicao ultimaLeitura={ultimaLeitura} tema={tema} />
       
         <div className="grafico-card">
-          <GraficoEnergia dados={leituras} tema={tema} />
+          <GraficoEnergia 
+            dados={leituras} 
+            tema={tema} 
+            sensorId={sensorId}
+            pausado={pausado} 
+            setPausado={setPausado} 
+          />
         </div>
       </div>
     );
@@ -95,7 +106,13 @@ export const PaginaInicial = ({ tema }) => {
               </div>
             
               <div className="small-grafico-card">
-                <GraficoEnergia dados={sensorLeituras} tema={tema} compact height={450} />
+                <GraficoEnergia 
+                  dados={sensorLeituras} 
+                  tema={tema} 
+                  compact height={450}
+                  pausado={pausado} 
+                  setPausado={setPausado} 
+                />
               </div>
             </div>
           );
